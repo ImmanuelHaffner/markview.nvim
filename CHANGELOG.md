@@ -1,5 +1,23 @@
 # Changelog
 
+## [28.2.0](https://github.com/OXY2DEV/markview.nvim/compare/v28.1.0...v28.2.0) (2026-03-18)
+
+
+### Features
+
+* **icons:** add missing filetypes and fix generic fallbacks ([eff7690](https://github.com/OXY2DEV/markview.nvim/commit/eff76903ef7df28f78acf258437268ab9355e38d))
+* **icons:** add missing filetypes and fix generic fallbacks ([8dca41c](https://github.com/OXY2DEV/markview.nvim/commit/8dca41ce7e605d5748e793a0cf6a91635bc3dcc9))
+* **latex:** Allow rendering of symbols directly part of `subscript`/`superscript` ([239feb7](https://github.com/OXY2DEV/markview.nvim/commit/239feb70ed1cfc26e2c91b32590fd63f7b015599)), closes [#475](https://github.com/OXY2DEV/markview.nvim/issues/475)
+* **renderers, markdown:** Use LPeg for parsing table columns ([918f3f9](https://github.com/OXY2DEV/markview.nvim/commit/918f3f92e87d28a487af89912d774521a52f9888)), closes [#476](https://github.com/OXY2DEV/markview.nvim/issues/476)
+
+
+### Bug Fixes
+
+* **asciidoc:** Prevent rendering inside source blocks/code blocks ([12e4e62](https://github.com/OXY2DEV/markview.nvim/commit/12e4e62c76bf1f29d05c5e07e9d71f50cb3f0df7))
+* **autocmds:** `set_query()` fix for `codecompanion.nvim` buffers ([542b4b8](https://github.com/OXY2DEV/markview.nvim/commit/542b4b8f18e41df35cfbcd93c6b776e0226f30d0)), closes [#480](https://github.com/OXY2DEV/markview.nvim/issues/480)
+* **autocmds:** Correctly handle `0` in autocmds ([0383545](https://github.com/OXY2DEV/markview.nvim/commit/0383545e06e99ef251a590f13ae77e6e404871c3)), closes [#478](https://github.com/OXY2DEV/markview.nvim/issues/478)
+* **parsers, markdown, table:** Allow empty columns ([fdc8bac](https://github.com/OXY2DEV/markview.nvim/commit/fdc8bac74550f2ac847578cb74c7ad99b3421bc2)), closes [#473](https://github.com/OXY2DEV/markview.nvim/issues/473)
+
 ## [28.1.0](https://github.com/OXY2DEV/markview.nvim/compare/v28.0.0...v28.1.0) (2026-03-04)
 
 
