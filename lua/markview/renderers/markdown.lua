@@ -1658,7 +1658,7 @@ markdown.table = function (buffer, item)
 
 		local table_width = 1;
 
-		for _, col in ipairs(vim_width) do
+		for _, col in ipairs(col_widths) do
 			table_width = table_width + 1 + col;
 		end
 
