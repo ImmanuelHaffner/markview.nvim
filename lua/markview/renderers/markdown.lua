@@ -1863,6 +1863,7 @@ markdown.table = function (buffer, item)
 							{ string.rep(" ", math.max(0, column_width - visible_width)) }
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				elseif item.alignments[c] == "right" then
@@ -1873,6 +1874,7 @@ markdown.table = function (buffer, item)
 							{ string.rep(" ", math.max(0, column_width - visible_width)) }
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				else
@@ -1883,6 +1885,7 @@ markdown.table = function (buffer, item)
 							{ string.rep(" ", math.ceil((column_width - visible_width) / 2)) }
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 					vim.api.nvim_buf_set_extmark(buffer, markdown.ns, range.row_start, range.col_start + part.col_end, {
@@ -1892,6 +1895,7 @@ markdown.table = function (buffer, item)
 							{ string.rep(" ", math.floor((column_width - visible_width) / 2)) }
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				end
@@ -1973,6 +1977,7 @@ markdown.table = function (buffer, item)
 							{ string.rep(border, left), utils.set_hl(border_hl) },
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				else
@@ -2020,6 +2025,7 @@ markdown.table = function (buffer, item)
 							{ string.rep(border, left), utils.set_hl(border_hl) },
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				else
@@ -2068,6 +2074,7 @@ markdown.table = function (buffer, item)
 							{ align, utils.set_hl(align_hl) }
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				else
@@ -2117,6 +2124,7 @@ markdown.table = function (buffer, item)
 							{ align[2], utils.set_hl(align_hl[2]) }
 						},
 
+						right_gravity = false,
 						hl_mode = "combine"
 					});
 				else
