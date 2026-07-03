@@ -143,20 +143,39 @@ inline.emoji = function (_, TSNode, text, range)
 
 		for short_code in _line:gmatch("%:[%a%d%_%+%-]+%:") do
 			local c_s, c_e = _line:find(short_code, 0, #_line, true);
+			local name = short_code:gsub(":", "");
 
-			inline.insert({
-				class = "inline_emoji",
-				name = short_code:gsub(":", ""),
-				text = { short_code },
+			--- NOTE: Only treat this as an emoji if `name` actually resolves to
+			--- a known shorthand.
+			---
+			--- Without this guard the permissive `:[%a%d%_%+%-]+:` pattern also
+			--- matches things like `:38:` inside a `HH:mm:ss` timestamp (e.g.
+			--- `11:38:13`), inserting a spurious `inline_emoji` span.  The
+			--- renderer and `tostring` both ignore unknown names, so the width
+			--- calculation stays correct, but the stray span still desyncs inline
+			--- rendering from the table's width bookkeeping and drifts the cell's
+			--- right border by the number of `:` delimiters (2 per time cell).
+			---
+			--- Alternative considered: tighten the pattern to reject bare-digit
+			--- names (e.g. require at least one letter).  Rejected because real
+			--- shorthands ARE digit-only (`:100:`, `:1234:`), so that would drop
+			--- valid emoji.  Resolving against `symbols.shorthands` here makes the
+			--- parser agree with the renderer/`tostring` and is the safe choice.
+			if require("markview.symbols").shorthands[name] then
+				inline.insert({
+					class = "inline_emoji",
+					name = name,
+					text = { short_code },
 
-				range = {
-					row_start = range.row_start + (l - 1),
-					col_start = col_start + c_s - 1,
+					range = {
+						row_start = range.row_start + (l - 1),
+						col_start = col_start + c_s - 1,
 
-					row_end = range.row_start + (l - 1),
-					col_end = col_start + c_e
-				}
-			});
+						row_end = range.row_start + (l - 1),
+						col_end = col_start + c_e
+					}
+				});
+			end
 
 			_line = _line:gsub(vim.pesc(short_code), function (s)
 				return string.rep("X", vim.fn.strchars(s));
