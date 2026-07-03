@@ -8,6 +8,34 @@ Used for width calculations.
 ]]
 local md_str = {};
 
+-- Sentinel byte prefixed to emphasis-inner text before re-running the grammar.
+--
+-- The emphasis handlers (`bold`, `italic`, `bold_italic`) strip their `*`/`_`
+-- markers and re-match the inner text.  That resets the byte position to 1, so
+-- position-anchored patterns whose boundary is "start-of-line or after
+-- whitespace" (tags -- mirroring `parsers/markdown_inline.lua`) would match
+-- spuriously: e.g. `**#foo**` would render the inner `#foo` as a tag (` foo `,
+-- width 5) even though the parser does NOT -- the `#` is preceded by `*`, not
+-- whitespace -- so only the raw `#foo` (width 4) is drawn.  The width then
+-- exceeds what is rendered and the table's right border drifts left.
+--
+-- `\1` is non-whitespace and starts no token.  Only the TAG pattern consults
+-- it (via `at_tag_valid`), so a leading tag is suppressed while a tag after a
+-- real space, e.g. `**a #foo**`, still matches.  Emphasis and inline code
+-- intentionally still open right after the sentinel (`at_valid` accepts it),
+-- so `**_x_**` / ``**`code`**`` are unaffected.  The sentinel passes through the
+-- grammar verbatim and is stripped from the result, contributing no width.
+local NESTED_SENTINEL = "\1";
+
+--- Re-render emphasis-inner text without letting a tag match at the artificial
+--- start of the stripped fragment (see `NESTED_SENTINEL`).
+---@param inner string
+---@return string
+local function nested_tostring(inner)
+	local rendered = md_str.tostring(md_str.buffer, NESTED_SENTINEL .. inner, false);
+	return (rendered:gsub("^" .. NESTED_SENTINEL, "", 1));
+end
+
 local function eval(tbl, ignore, ...)
 	---|fS
 
@@ -171,7 +199,7 @@ md_str.bold = function (match)
 		removed = string.gsub(match, "^%_%_", ""):gsub("%_%_$", "");
 	end
 
-	return md_str.tostring(md_str.buffer, removed, false);
+	return nested_tostring(removed);
 
 	---|fE
 end
@@ -196,7 +224,7 @@ md_str.bold_italic = function (match)
 	end
 
 	local removed = vim.fn.strpart(match, r, vim.fn.strchars(match) - (r + r));
-	return md_str.tostring(md_str.buffer, removed, false);
+	return nested_tostring(removed);
 
 	---|fE
 end
@@ -445,7 +473,7 @@ md_str.italic = function (match)
 		removed = string.gsub(match, "^%_", ""):gsub("%_$", "");
 	end
 
-	return md_str.tostring(md_str.buffer, removed, false);
+	return nested_tostring(removed);
 
 	---|fE
 end
@@ -722,7 +750,18 @@ local lpeg = vim.lpeg;
 
 local at_start = lpeg.P(function (_, i) return i == 1; end);
 local after_sp = lpeg.B(lpeg.S(" \t"));
-local at_valid = (at_start + after_sp);
+
+-- `nested_tostring` prefixes emphasis-inner text with a `\1` sentinel so that
+-- position-anchored patterns do not treat the stripped fragment's first byte
+-- as a genuine start-of-line.  Most patterns (italic `_`, inline code) SHOULD
+-- still open at the start of an emphasis span (CommonMark allows `**_x_**`,
+-- ``**`code`**``), so `at_valid` treats "right after the sentinel" as start-of-
+-- line too.  The TAG pattern is the exception: `#foo` inside `**#foo**` is not
+-- a tag (its `#` is preceded by `*`, not whitespace), so it uses the stricter
+-- `at_tag_valid`, which does NOT accept the position right after the sentinel.
+local after_sentinel = lpeg.B(lpeg.P("\1"));
+local at_valid = (at_start + after_sp + after_sentinel);
+local at_tag_valid = (at_start + after_sp);
 
 -- CommonMark flanking rules for `*` emphasis.
 --
@@ -840,13 +879,15 @@ local hl = lpeg.C( lpeg.P("==") * hl_content^1 * lpeg.P("==") ) / md_str.highlig
 local strike_content = lpeg.P("\\~") + ( 1 - lpeg.P("~") );
 local strike = lpeg.C( lpeg.P("~~") * strike_content^1 * lpeg.P("~~") ) / md_str.strikethrough;
 
--- Obsidian-style tag: `#` followed by tag characters, only at the start of a
--- token position (start-of-string or after whitespace, via `at_valid`) and not
--- part of an internal-link `#^section` (guarded by the trailing `-]]`). Mirrors
--- the tag parser in `parsers/markdown_inline.lua` so the width computed here
--- matches what the tag renderer draws (concealed `#` + paddings).
+-- Obsidian-style tag: `#` followed by tag characters, at the start of a token
+-- position and not part of an internal-link `#^section` (guarded by trailing
+-- `-]]`). Uses `at_tag_valid` (NOT `at_valid`): a `#` right after the emphasis
+-- sentinel is NOT a tag, mirroring the tag parser in
+-- `parsers/markdown_inline.lua` (whose boundary rejects a `#` preceded by the
+-- `*`/`_` marker). Keeps the width for `**#foo**` matching what is drawn (raw
+-- `#foo`, since the parser emits no tag there).
 local tag_char = lpeg.R("09", "az", "AZ") + lpeg.S("_-");
-local tag = lpeg.C( at_valid * lpeg.P("#") * tag_char^1 * -lpeg.P("]]") ) / md_str.tag;
+local tag = lpeg.C( at_tag_valid * lpeg.P("#") * tag_char^1 * -lpeg.P("]]") ) / md_str.tag;
 
 local any = lpeg.P(1);
 
