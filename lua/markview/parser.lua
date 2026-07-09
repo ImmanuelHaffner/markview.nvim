@@ -5,8 +5,9 @@ local health = require("markview.health");
 
 ---@type [ integer, integer ][] List of line ranges to ignore.
 parser.ignore_ranges = {};
-
---- Cached contents.
+--- Cached parse results, keyed by buffer.
+--- Each entry: { tick = changedtick, from, to, content, sorted }.
+--- A parse is reused when tick/from/to all match (see parser.init).
 parser.cached = {};
 
 --- Creates ignore ranges from a list of parsed items.
@@ -116,6 +117,39 @@ parser.content = {};
 ---@type markview.parsed_sorted
 parser.sorted = {};
 
+--- Structural copy of a parsed "view" ({ [lang] = { node, ... } }).
+---
+--- Copies only the CONTAINER tables (the outer lang map and each per-language
+--- list) so the caller can table.remove()/insert() entries without touching the
+--- shared original. Node entries themselves are shared by reference, NOT copied:
+--- they hold tree-sitter userdata (TSNode) that vim.deepcopy() cannot handle,
+--- and renderer.filter() only ever reorders/removes list entries, never mutates
+--- a node in place. Used to hand out cache copies (see parser.init).
+---@generic T
+---@param view T
+---@return T
+parser.copy_view = function (view)
+	if type(view) ~= "table" then
+		return view;
+	end
+
+	local out = {};
+
+	for lang, list in pairs(view) do
+		if type(list) == "table" then
+			local copy = {};
+			for i, node in ipairs(list) do
+				copy[i] = node;
+			end
+			out[lang] = copy;
+		else
+			out[lang] = list;
+		end
+	end
+
+	return out;
+end
+
 --- Initializes the parsers on the specified buffer
 --- Parsed data is stored as a "view" in renderer.lua
 ---
@@ -127,6 +161,29 @@ parser.sorted = {};
 ---@return markview.parsed_sorted
 parser.init = function (buffer, from, to, cache)
 	---|fS
+
+	-- Content cache: on an unchanged buffer (same changedtick) and identical
+	-- range, the parse result is byte-identical, so reuse it and skip the whole
+	-- parse. changedtick bumps on any edit, invalidating the entry implicitly.
+	-- This is the common case for a hybrid-mode cursor move that does not scroll
+	-- (range is viewport-derived, not cursor-derived).
+	local tick = vim.api.nvim_buf_get_changedtick(buffer);
+	local hit = parser.cached[buffer];
+
+	if cache ~= false and hit and hit.tick == tick and hit.from == from and hit.to == to then
+		-- Return COPIES, not the cached tables themselves. Callers mutate the
+		-- returned content in place -- notably hybrid mode, where
+		-- renderer.filter() does table.remove() on the per-language node lists to
+		-- hide nodes around the cursor. Handing out the cached reference would let
+		-- that removal corrupt the cache: the next cursor move (same changedtick,
+		-- same viewport range) hits the cache and gets the already-pruned table,
+		-- so nodes hidden under the previous cursor position never come back
+		-- until a scroll changes the range and forces a fresh parse.
+		parser.content = parser.copy_view(hit.content);
+		parser.sorted = parser.copy_view(hit.sorted);
+		parser.ignore_ranges = hit.ignore_ranges or {};
+		return parser.content, parser.sorted;
+	end
 
 	local _parsers = {
 		asciidoc = require("markview.parsers.asciidoc"),
@@ -185,10 +242,24 @@ parser.init = function (buffer, from, to, cache)
 
 	---|fE
 
+	-- Normalized inclusive line bounds for the tree-overlap test below.
+	-- `from`/`to` may be nil or `to == -1` (meaning end-of-buffer).
+	local ov_from = from or 0;
+	local ov_to = (to == nil or to < 0) and math.huge or to;
+
 	root_parser:for_each_tree(function (TSTree, language_tree)
 		language_tree:parse(true);
 
 		local language = language_tree:lang();
+		-- Skip trees whose range does not overlap [from, to]. On a large buffer
+		-- this avoids running per-language extraction over thousands of injection
+		-- trees (e.g. one markdown_inline tree per line) that lie outside the
+		-- rendered range. Whole-buffer trees (the markdown root) always overlap
+		-- and are never skipped, so ignore-range detection is unaffected.
+		local ts_start, _, ts_end = TSTree:root():range();
+		if ts_end < ov_from or ts_start > ov_to then
+			return;
+		end
 		local content, sorted = {}, {};
 
 		if language == "yaml" and not parser.should_ignore_yaml(root_parser, TSTree) then
@@ -204,7 +275,19 @@ parser.init = function (buffer, from, to, cache)
 	end)
 
 	if cache ~= false then
-		parser.cached[buffer] = parser.sorted;
+		-- Store COPIES, decoupled from the returned parser.content/sorted. The
+		-- caller mutates the returned tables in place (hybrid mode removes nodes
+		-- around the cursor via renderer.filter), so caching the live references
+		-- would let that mutation corrupt the freshly-stored entry -- see the
+		-- matching copy on the cache-hit path above.
+		parser.cached[buffer] = {
+			tick = tick,
+			from = from,
+			to = to,
+			content = parser.copy_view(parser.content),
+			sorted = parser.copy_view(parser.sorted),
+			ignore_ranges = parser.ignore_ranges,
+		};
 	end
 
 	---|fS "chore: Announce end of parsing"
