@@ -18,6 +18,7 @@
 ---| "mini" `mini.icons` as icon provider.
 ---
 ---@field debounce? integer Debounce delay for updating previews.
+---@field scroll_debounce? integer Debounce delay for re-rendering after scroll/resize (WinScrolled).
 ---@field filetypes? string[] Buffer filetypes where the plugin should attach.
 ---@field ignore_buftypes? string[] Buftypes that should be ignored(e.g. nofile).
 ---@field raw_previews? markview.config.preview.raw Options that will show up as raw in hybrid mode.

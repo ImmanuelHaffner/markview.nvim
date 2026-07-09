@@ -392,6 +392,64 @@ autocmds.cursor = function (args)
 	---|fE
 end
 
+---@diagnostic disable-next-line: undefined-field
+autocmds.scroll_timer = vim.uv.new_timer();
+
+--[[ Window scrolled, resized or split. ]]
+--- Fires on `WinScrolled`, which covers vertical/horizontal scrolling as well
+--- as window width/height changes (resize, split). Unlike `cursor`, this must
+--- NOT reuse the `use_delay`/`ignore` short-circuit: once rendering becomes
+--- viewport-scoped (A2), a pure scroll of even a small buffer has to re-render,
+--- so the small-buffer ignore rule from `use_delay` would wrongly suppress it.
+---@param args vim.api.keyset.create_autocmd.callback_args
+autocmds.scroll = function (args)
+	---|fS
+
+	local state = require("markview.state");
+	local actions = require("markview.actions");
+
+	autocmds.scroll_timer:stop();
+
+	if not args.buf or not state.enabled() or not state.buf_attached(args.buf) then
+		return;
+	elseif args.buf ~= state.get_splitview_source() then
+		local buf_state = state.get_buffer_state(args.buf, false)
+
+		if not buf_state or not buf_state.enable then
+			return;
+		end
+	end
+
+	local function action ()
+		-- The debounce timer + vim.schedule_wrap mean this closure runs on a
+		-- later event-loop tick than the autocmd that queued it. Re-validate
+		-- the buffer before any nvim_buf_* call reaches it.
+		if not args.buf or not vim.api.nvim_buf_is_valid(args.buf) then
+			return;
+		end
+		require("markview.health").print({
+			from = "markview/autocmds.lua",
+			fn = "scroll() -> action()",
+
+			message = "Window scroll/resize process.",
+			nest = true,
+		});
+
+		if args.buf == state.get_splitview_source() then
+			actions.splitview_render();
+		elseif actions.in_preview_mode() then
+			actions.render(args.buf);
+		end
+
+		require("markview.health").print({ kind = "skip", back = true });
+	end
+
+	local delay = require("markview.spec").get({ "preview", "scroll_debounce" }, { fallback = 100, ignore_enable = true });
+	autocmds.scroll_timer:start(delay, 0, vim.schedule_wrap(action));
+
+	---|fE
+end
+
 --- If the file is changed by some other program. Tree-sitter queries need to be set again.
 ---@param args vim.api.keyset.create_autocmd.callback_args
 autocmds.file_changed = function (args)
@@ -527,6 +585,10 @@ autocmds.setup = function ()
 		"CursorMovedI", "TextChangedI"
 	}, {
 		callback = autocmds.cursor
+	});
+
+	vim.api.nvim_create_autocmd("WinScrolled", {
+		callback = autocmds.scroll
 	});
 
 	vim.api.nvim_create_autocmd("FileChangedShellPost", {

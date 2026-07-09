@@ -187,6 +187,7 @@ spec.default = {
 		map_gx = true,
 
 		debounce = 150,
+		scroll_debounce = 100,
 		icon_provider = "internal",
 
 		filetypes = { "markdown", "quarto", "rmd", "typst", "asciidoc", },
