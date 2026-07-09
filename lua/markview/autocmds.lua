@@ -41,12 +41,13 @@ autocmds.use_delay = function (buffer, event_name, args)
 
 		local h_now = actions.in_hybrid_mode();
 
-		---@type integer
-		local max_l = require("markview.spec").get({ "preview", "max_buf_lines" }, { fallback = 1000, ignore_enable = true });
-
 		if not p_now then
 			return true, true;
-		elseif not h_now and vim.api.nvim_buf_line_count(args.buf) < max_l then
+		elseif not h_now then
+			-- Non-hybrid preview: rendering is viewport-scoped and WinScrolled
+			-- re-renders on any view change, so a non-scrolling cursor move yields
+			-- an identical render. Only hybrid mode (which clears decorations
+			-- around the cursor) must react to plain cursor movement.
 			return true, true;
 		end
 
