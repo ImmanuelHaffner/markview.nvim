@@ -6,6 +6,16 @@ health.depth = 0;
 health.history = {};
 health.log = {};
 
+--- Maximum number of entries retained in `health.history`.
+---
+--- `health.print()` is called several times per render pass, so an
+--- unbounded history would grow without limit for the life of the
+--- session (a slow memory leak). The history is only consumed by the
+--- debug trace viewer (`health.view`) and `health.export`, which only
+--- ever want the most recent entries, so a bounded ring is sufficient.
+---@type integer
+health.history_limit = 2048;
+
 --- Print log messages.
 ---@param msg table
 health.print = function (msg)
@@ -25,6 +35,12 @@ health.print = function (msg)
 	msg.show = msg.show == true;
 
 	table.insert(health.history, msg);
+
+	-- Keep the history bounded so it cannot grow without limit across a
+	-- long editing session. Drop the oldest entries once the cap is hit.
+	while #health.history > health.history_limit do
+		table.remove(health.history, 1);
+	end
 
 	if msg.kind == "hl" then
 		---|fS "feat: Show highlight group errors"
