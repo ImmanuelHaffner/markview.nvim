@@ -31,7 +31,7 @@
 ---@field linewise_hybrid_mode? boolean Clear lines around the cursor in `hybrid mode`, instead of nodes.
 ---@field max_buf_lines? integer Maximum number of lines a buffer can have before switching to partial rendering.
 ---
----@field draw_range? [ integer, integer ] Lines above & below the cursor to show preview.
+---@field draw_range? [ integer, integer ] | fun(win: integer): [ integer, integer ] Lines above the viewport top & below the viewport bottom to render. May be a function evaluated per-window (e.g. window height). Defaults to one screen each way.
 ---@field edit_range? [ integer, integer ] Lines above & below the cursor to not preview in `hybrid mode`.
 ---
 ---@field splitview_winopts? table Window options for the `splitview` window. See `:h nvim.open_win()`.

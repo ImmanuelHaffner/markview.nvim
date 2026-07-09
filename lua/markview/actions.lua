@@ -58,6 +58,51 @@ actions.get_range = function (from, offset, max)
 	};
 end
 
+--- Computes the render range around a window's VISIBLE region, rather than
+--- around the cursor. `topline`/`botline` from `getwininfo` are buffer line
+--- numbers and are fold-aware, so this composes naturally with folds.
+---@param win integer Window ID.
+---@param offset [ integer, integer ] Lines to extend above topline / below botline.
+---@param max integer Buffer line count (clamp upper bound).
+---@return [ integer, integer ]
+actions.get_viewport_range = function (win, offset, max)
+	local info = vim.fn.getwininfo(win)[1];
+
+	if not info then
+		return { 0, max };
+	end
+
+	return {
+		math.max(0, (info.topline - 1) - offset[1]),
+		math.min((info.botline - 1) + offset[2], max)
+	};
+end
+
+--- Coerces a `draw_range` spec value into a valid `[ above, below ]` numeric
+--- list. A function value is evaluated per-window via `eval_args`; anything
+--- that is not a 2-element numeric list falls back to one screen height.
+---@param win integer Window ID.
+---@return [ integer, integer ]
+actions.get_draw_range = function (win)
+	local spec = require("markview.spec");
+	local fallback = { vim.o.lines, vim.o.lines };
+
+	local val = spec.get(
+		{ "preview", "draw_range" },
+		{ fallback = fallback, ignore_enable = true, eval_args = { win } }
+	);
+
+	if
+		type(val) ~= "table" or
+		type(val[1]) ~= "number" or
+		type(val[2]) ~= "number"
+	then
+		return fallback;
+	end
+
+	return { val[1], val[2] };
+end
+
 --[[ Handles `hybrid mode` rendering. ]]
 ---@param linewise boolean
 ---@param buffer integer
@@ -179,11 +224,13 @@ actions.render = function (_buffer, _state, _config)
 			renderer.render(buffer, content);
 		end
 	else
-		local draw_range = spec.get({ "preview", "draw_range" }, { fallback = { vim.o.lines, vim.o.lines }, ignore_enable = true });
-
 		for _, win in ipairs(vim.fn.win_findbuf(buffer)) do
-			local cursor = vim.api.nvim_win_get_cursor(win);
-			local R = actions.get_range(cursor[1], draw_range, L);
+			-- Render around the VISIBLE viewport (topline-above .. botline+below),
+			-- not around the cursor: cursor and view can be far apart (zt/zz/<C-e>/
+			-- H/M/L/mouse), and WinScrolled now re-renders on scroll. `draw_range`
+			-- is evaluated per-window (it may be a function).
+			local draw_range = actions.get_draw_range(win);
+			local R = actions.get_viewport_range(win, draw_range, L);
 
 			-- TODO: See if we need to `R[2] + 1`.
 			local content, _ = parser.parse(buffer, R[1], R[2], true);
