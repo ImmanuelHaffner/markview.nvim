@@ -192,30 +192,70 @@ end
 
 --------------------------------------------------------------------------------
 
----@param language string
----@param line string
----@return string
-visual.get_visual_text = function (language, line)
+--- Cache for the `language -> ft` resolution.
+---
+--- `get_visual_text()` is called once per line of every code block on every
+--- render, but the mapping from a fenced-code `language` to a filetype (and
+--- whether a usable transform exists for it) is invariant. Detecting it with
+--- `vim.filetype.match()` on each call re-runs the entire filetype pattern
+--- engine hundreds of times per render for a handful of distinct languages
+--- (including the common no-language case). Memoize it instead.
+---
+--- Keyed by the raw `language` argument; a sentinel stands in for `nil` so the
+--- no-language case is resolved once and reused. Each entry stores the
+--- resolved `ft` and the transform function to apply (or `false` when no
+--- usable transform exists, so the line is returned verbatim).
+---@type table<string, { ft: string?, transform: (fun(line: string): string)|false }>
+visual.ft_cache = {};
+
+--- Sentinel key for a `nil` language.
+local NIL_LANGUAGE = "\0nil";
+
+---@param language string?
+---@return { ft: string?, transform: (fun(line: string): string)|false }
+visual.resolve_ft = function (language)
 	---|fS
+
+	local key = language == nil and NIL_LANGUAGE or language;
+
+	local cached = visual.ft_cache[key];
+	if cached ~= nil then
+		return cached;
+	end
 
 	local ft = vim.filetype.match({
 		filename = string.format("example.%s", language)
 	}) or language;
 
+	local entry;
+
 	local found_parser = pcall(vim.treesitter.language.inspect, ft);
 
-	if not found_parser then
+	if not found_parser or ft == nil or type(visual[ft]) ~= "function" then
+		entry = { ft = ft, transform = false };
+	else
+		entry = { ft = ft, transform = visual[ft] };
+	end
+
+	visual.ft_cache[key] = entry;
+	return entry;
+
+	---|fE
+end
+
+---@param language string?
+---@param line string
+---@return string
+visual.get_visual_text = function (language, line)
+	---|fS
+
+	local entry = visual.resolve_ft(language);
+
+	if entry.transform == false then
 		return line;
 	end
 
-	if ft == nil or visual[ft] == nil then
-		return line;
-	elseif pcall(visual[ft], line) == false then
-		--- Text transformation failed!
-		return line;
-	end
-
-	local could_get, visual_text = pcall(visual[ft], line);
+	local could_get, visual_text = pcall(entry.transform, line);
 	return could_get and visual_text or line;
 
 	---|fE
