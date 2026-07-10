@@ -140,6 +140,11 @@ autocmds.modeChanged = function (args)
 
 	local state = require("markview.state");
 
+	-- Cancel any pending render: a mode change supersedes an older queued
+	-- render on the shared timer, and the early-return paths below must not
+	-- leave a stale debounced render behind.
+	autocmds.render_timer:stop();
+
 	if not args.buf or not state.enabled() or not state.buf_attached(args.buf) then
 		return;
 	else
@@ -157,6 +162,11 @@ autocmds.modeChanged = function (args)
 	end
 
 	local function action ()
+		-- Runs on a later tick via the shared debounce timer; the buffer may
+		-- have been wiped in the meantime, so re-validate before use.
+		if not args.buf or not vim.api.nvim_buf_is_valid(args.buf) then
+			return;
+		end
 		require("markview.health").print({
 			from = "markview/autocmds.lua",
 			fn = "modeChanged() -> action()",
@@ -182,9 +192,9 @@ autocmds.modeChanged = function (args)
 	end
 
 	if use_delay then
-		vim.defer_fn(action, 0);
+		autocmds.schedule(action);
 	else
-		action();
+		autocmds.run_now(action);
 	end
 
 	---|fE
@@ -318,8 +328,38 @@ autocmds.optionSet = function (args)
 	---|fE
 end
 
+--[[
+Unified render debounce timer.
+
+Every activity-driven re-render / un-render (cursor movement, window scroll,
+text change, mode change) is funnelled through this single timer via
+`autocmds.schedule`. Sharing one timer guarantees that newer activity always
+cancels an older pending render, so nothing is drawn until the buffer has been
+quiet for `preview.debounce` milliseconds. The immediate escape hatch
+(`autocmds.run_now`, used when `use_delay` is false) still cancels the timer
+first, so a stale debounced action can never fire after an immediate render.
+]]
 ---@diagnostic disable-next-line: undefined-field
-autocmds.cursor_timer = vim.uv.new_timer();
+autocmds.render_timer = vim.uv.new_timer();
+
+--- Debounce `action` on the shared render timer, using `preview.debounce`.
+--- Any previously scheduled action is cancelled.
+---@param action fun()
+autocmds.schedule = function (action)
+	autocmds.render_timer:stop();
+	local delay = require("markview.spec").get({ "preview", "debounce" }, { fallback = 150, ignore_enable = true });
+	autocmds.render_timer:start(delay, 0, vim.schedule_wrap(action));
+end
+
+--- Immediate escape hatch: cancel any pending debounced render and run `action`
+--- now. Used by the `use_delay == false` paths (large cursor jumps, preview /
+--- hybrid mode transitions) so they stay responsive without leaving a stale
+--- debounced action queued behind them.
+---@param action fun()
+autocmds.run_now = function (action)
+	autocmds.render_timer:stop();
+	action();
+end
 
 --[[ Cursor moved. ]]
 ---@param args vim.api.keyset.create_autocmd.callback_args
@@ -329,7 +369,10 @@ autocmds.cursor = function (args)
 	local state = require("markview.state");
 	local actions = require("markview.actions");
 
-	autocmds.cursor_timer:stop();
+	-- Cancel any pending render immediately: a fresh cursor event supersedes
+	-- whatever was queued, and even the `ignore`/early-return paths below must
+	-- not leave a stale debounced render behind.
+	autocmds.render_timer:stop();
 	local splitview_src = state.get_splitview_source();
 
 	if not args.buf or not state.enabled() or not state.buf_attached(args.buf) then
@@ -382,19 +425,14 @@ autocmds.cursor = function (args)
 		require("markview.health").print({ kind = "skip", back = true });
 	end
 
-	local delay = require("markview.spec").get({ "preview", "debounce" }, { fallback = 25, ignore_enable = true });
-
 	if use_delay then
-		autocmds.cursor_timer:start(delay, 0, vim.schedule_wrap(action));
+		autocmds.schedule(action);
 	else
-		action();
+		autocmds.run_now(action);
 	end
 
 	---|fE
 end
-
----@diagnostic disable-next-line: undefined-field
-autocmds.scroll_timer = vim.uv.new_timer();
 
 --[[ Window scrolled, resized or split. ]]
 --- Fires on `WinScrolled`, which covers vertical/horizontal scrolling as well
@@ -402,6 +440,8 @@ autocmds.scroll_timer = vim.uv.new_timer();
 --- NOT reuse the `use_delay`/`ignore` short-circuit: once rendering becomes
 --- viewport-scoped (A2), a pure scroll of even a small buffer has to re-render,
 --- so the small-buffer ignore rule from `use_delay` would wrongly suppress it.
+--- Scroll shares the unified `render_timer` with `cursor`, so a scroll and a
+--- cursor move debounce against each other rather than racing separately.
 ---@param args vim.api.keyset.create_autocmd.callback_args
 autocmds.scroll = function (args)
 	---|fS
@@ -409,7 +449,9 @@ autocmds.scroll = function (args)
 	local state = require("markview.state");
 	local actions = require("markview.actions");
 
-	autocmds.scroll_timer:stop();
+	-- Cancel any pending render: a scroll supersedes an older queued render
+	-- (from cursor or scroll alike) on the shared timer.
+	autocmds.render_timer:stop();
 
 	if not args.buf or not state.enabled() or not state.buf_attached(args.buf) then
 		return;
@@ -445,8 +487,7 @@ autocmds.scroll = function (args)
 		require("markview.health").print({ kind = "skip", back = true });
 	end
 
-	local delay = require("markview.spec").get({ "preview", "scroll_debounce" }, { fallback = 100, ignore_enable = true });
-	autocmds.scroll_timer:start(delay, 0, vim.schedule_wrap(action));
+	autocmds.schedule(action);
 
 	---|fE
 end
@@ -467,7 +508,8 @@ autocmds.file_changed = function (args)
 	local state = require("markview.state");
 	local actions = require("markview.actions");
 
-	autocmds.cursor_timer:stop();
+	-- Cancel any pending render while tree-sitter queries are being reset.
+	autocmds.render_timer:stop();
 
 	if not state.buf_safe(args.buf) then
 		--[[
